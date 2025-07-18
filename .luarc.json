@@ -1,9 +1,18 @@
 {
-  "Lua.runtime.version": "Lua 5.1",
-  "Lua.workspace.library": [
-    "stub"
-  ],
+  "Lua.runtime.version": "Lua 5.3",
   "Lua.diagnostics.globals": [
     "gpio", "tmr", "wifi", "node"
-  ]
+  ],
+    "workspace.library": [
+        "${addons}/nodemcu-esp8266/module/library"
+    ],
+    "runtime.builtin": {
+        "bit": "disable",
+        "bit32": "disable",
+        "io": "disable",
+        "math": "disable",
+        "os": "disable",
+        "utf8": "disable"
+    },
+    "workspace.checkThirdParty": false
 }

@@ -64,12 +64,12 @@ else
     PLATFORM=unknown
   endif
 endif
-LUACROSS_BIN=$(TOOLS_DIR)/luac.cross.$(PLATFORM)
+LUACROSS_BIN=$(TOOLS_DIR)/luac.cross
 
 ifeq ($(OS),Windows_NT)
 TOUCH = cmd /c type nul >
-COPY_FIRMWARE = powershell -Command "$f = Get-ChildItem -Path '$(FIRMWARE_DIR)/bin' -Filter 'nodemcu-master-*.bin' | Sort-Object LastWriteTime -Descending | Select-Object -First 1; if ($f) { Copy-Item $f.FullName -Destination '$(TOOLS_DIR)/firmware-latest.bin' }"
-COPY_LUACROSS = powershell -Command "$f = Get-ChildItem -Path '$(FIRMWARE_DIR)' -Filter 'luac.cross*' | Sort-Object LastWriteTime -Descending | Select-Object -First 1; if ($f) { Copy-Item $f.FullName -Destination '$(LUACROSS_BIN)' }"
+COPY_FIRMWARE = powershell -Command "$$f = Get-ChildItem -Path '$(FIRMWARE_DIR)/bin' -Filter 'nodemcu_*.bin' | Sort-Object LastWriteTime -Descending | Select-Object -First 1; Write-Output \"$$f\"; if ($$f) { Copy-Item $$f.FullName -Destination '$(TOOLS_DIR)/firmware-latest.bin' }"
+COPY_LUACROSS = powershell -Command "$$f = Get-ChildItem -Path '$(FIRMWARE_DIR)' -Filter 'luac.cross*' | Sort-Object LastWriteTime -Descending | Select-Object -First 1; if ($$f) { Copy-Item $$f.FullName -Destination '$(LUACROSS_BIN)' }"
 else
 TOUCH = touch
 COPY_FIRMWARE = mkdir -p $(TOOLS_DIR); LATEST_FIRMWARE=$$(ls -t $(FIRMWARE_DIR)/bin/nodemcu-master-*.bin 2>/dev/null | head -n1); [ -n "$$LATEST_FIRMWARE" ] && cp $$LATEST_FIRMWARE $(TOOLS_DIR)/firmware-latest.bin
@@ -89,18 +89,26 @@ $(FIRMWARE_BIN_MARKER): $(FIRMWARE_DIR) $(USER_CONFIG) $(USER_MODULES)
 	  -v $(abspath $(USER_CONFIG)):/opt/nodemcu-firmware/app/include/user_config.h:ro \
 	  -v $(abspath $(USER_MODULES)):/opt/nodemcu-firmware/app/include/user_modules.h:ro \
 	  marcelstoer/nodemcu-build build
-	@$(COPY_LUACROSS)
 	$(TOUCH) $(FIRMWARE_BIN_MARKER)
 
 build-firmware: $(FIRMWARE_BIN_MARKER)
 
 copy-firmware:
 	@$(COPY_FIRMWARE)
+ 
+copy-luacross:
+	@$(COPY_LUACROSS)
+	chmod +x $(LUACROSS_BIN)
 
 compile: $(LC_FILES)
 
 $(BUILD_DIR)/%.lc: $(SRC_DIR)/%.lua
-	$(LUACROSS_BIN) -o $@ $<
+	docker run --rm \
+	  -v $(abspath $(SRC_DIR)):/src:ro \
+	  -v $(abspath $(BUILD_DIR)):/build \
+	  -v $(abspath $(TOOLS_DIR)):/tools:ro \
+	  debian:bookworm-slim \
+	  /tools/luac.cross.linux -o /build/$*.lc /src/$*.lua
 
 upload:
 	uvx nodemcu-uploader --port $(PORT) upload $(LC_FILES)
@@ -111,19 +119,3 @@ repl:
 clean:
 	rm -rf $(BUILD_DIR)/*.lc $(FIRMWARE_BIN_MARKER) $(LUACROSS_BIN) $(TOOLS_DIR)/firmware-latest.bin
 
-# VSCode Stub Modules (located in stub/)
-# - gpio.lua
-# - tmr.lua
-# - wifi.lua
-# - node.lua
-
-# Example stub/gpio.lua:
-# local gpio = {}
-# gpio.INPUT = 0
-# gpio.OUTPUT = 1
-# gpio.HIGH = 1
-# gpio.LOW = 0
-# function gpio.mode(pin, mode) end
-# function gpio.write(pin, value) end
-# function gpio.read(pin) return gpio.LOW end
-# return gpio
