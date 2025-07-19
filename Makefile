@@ -51,64 +51,55 @@ USER_CONFIG=$(CONFIG_DIR)/user_config.h
 USER_MODULES=$(CONFIG_DIR)/user_modules.h
 LUA_FILES=$(wildcard $(SRC_DIR)/*.lua)
 LC_FILES=$(patsubst $(SRC_DIR)/%.lua,$(BUILD_DIR)/%.lc,$(LUA_FILES))
-FIRMWARE_BIN_MARKER=$(FIRMWARE_DIR)/bin/firmware-build-stamp
-ifeq ($(OS),Windows_NT)
-  PLATFORM=windows
-else
-  UNAME_S := $(shell uname -s)
-  ifeq ($(UNAME_S),Linux)
-    PLATFORM=linux
-  else ifeq ($(UNAME_S),Darwin)
-    PLATFORM=darwin
-  else
-    PLATFORM=unknown
-  endif
-endif
-LUACROSS_BIN=$(TOOLS_DIR)/luac.cross
-
-ifeq ($(OS),Windows_NT)
-TOUCH = cmd /c type nul >
-COPY_FIRMWARE = powershell -Command "$$f = Get-ChildItem -Path '$(FIRMWARE_DIR)/bin' -Filter 'nodemcu_*.bin' | Sort-Object LastWriteTime -Descending | Select-Object -First 1; Write-Output \"$$f\"; if ($$f) { Copy-Item $$f.FullName -Destination '$(TOOLS_DIR)/firmware-latest.bin' }"
-COPY_LUACROSS = powershell -Command "$$f = Get-ChildItem -Path '$(FIRMWARE_DIR)' -Filter 'luac.cross*' | Sort-Object LastWriteTime -Descending | Select-Object -First 1; if ($$f) { Copy-Item $$f.FullName -Destination '$(LUACROSS_BIN)' }"
-else
-TOUCH = touch
-COPY_FIRMWARE = mkdir -p $(TOOLS_DIR); LATEST_FIRMWARE=$$(ls -t $(FIRMWARE_DIR)/bin/nodemcu-master-*.bin 2>/dev/null | head -n1); [ -n "$$LATEST_FIRMWARE" ] && cp $$LATEST_FIRMWARE $(TOOLS_DIR)/firmware-latest.bin
-COPY_LUACROSS = LATEST_CROSS=$$(ls -t $(FIRMWARE_DIR)/luac.cross* 2>/dev/null | head -n1); [ -n "$$LATEST_CROSS" ] && cp $$LATEST_CROSS $(LUACROSS_BIN)
-endif
+FIRMWARE_BUILD_MARKER_NAME=firmware-build-stamp
+FIRMWARE_BIN_MARKER=$(FIRMWARE_DIR)/bin/${FIRMWARE_BUILD_MARKER_NAME}
+ARCH := $(shell docker version --format '{{.Server.Arch}}')
+LUACROSS_BIN=$(TOOLS_DIR)/luac_cross_$(ARCH)
+DOCKER_IMAGE_NAME=dbwalker/lua-compiler-devtool:latest
+RESOURCE_DIR=resources
 
 all: compile
 
-firmware: build-firmware copy-firmware
+firmware: build-firmware copy-artifacts
 
 $(FIRMWARE_DIR):
 	git clone --branch release --recurse-submodules https://github.com/nodemcu/nodemcu-firmware.git $(FIRMWARE_DIR)
 
+	
 $(FIRMWARE_BIN_MARKER): $(FIRMWARE_DIR) $(USER_CONFIG) $(USER_MODULES)
 	docker run --rm -ti \
 	  -v $(abspath $(FIRMWARE_DIR)):/opt/nodemcu-firmware \
 	  -v $(abspath $(USER_CONFIG)):/opt/nodemcu-firmware/app/include/user_config.h:ro \
 	  -v $(abspath $(USER_MODULES)):/opt/nodemcu-firmware/app/include/user_modules.h:ro \
-	  marcelstoer/nodemcu-build build
-	$(TOUCH) $(FIRMWARE_BIN_MARKER)
+	  marcelstoer/nodemcu-build /bin/sh -c "build && touch /opt/nodemcu-firmware/bin/$(FIRMWARE_BIN_MARKER_NAME)"
 
 build-firmware: $(FIRMWARE_BIN_MARKER)
 
-copy-firmware:
-	@$(COPY_FIRMWARE)
+copy-artifacts:
+	docker run --rm \
+	  -v $(abspath $(FIRMWARE_DIR)):/fw:ro \
+	  -v $(abspath $(TOOLS_DIR)):/tools \
+	  debian:bookworm-slim \
+	  /bin/sh -c "\
+	    set -e; \
+	    fw_file=$$(ls -t /fw/bin/nodemcu_*.bin | head -n1); \
+	    cross_file=$$(ls -t /fw/luac.cross* | head -n1); \
+	    cp $$fw_file /tools/firmware-latest.bin; \
+	    cp $$cross_file /tools/luac.cross.linux.$(ARCH); \
+	    echo 'Copied:'; \
+	    echo '  Firmware ->' $$(basename $$fw_file); \
+	    echo '  Luacross ->' $$(basename $$cross_file); \
+	  "
  
-copy-luacross:
-	@$(COPY_LUACROSS)
-	chmod +x $(LUACROSS_BIN)
 
-compile: $(LC_FILES)
-
-$(BUILD_DIR)/%.lc: $(SRC_DIR)/%.lua
+compile: $(FIRMWARE_BIN_MARKER) 
 	docker run --rm \
 	  -v $(abspath $(SRC_DIR)):/src:ro \
 	  -v $(abspath $(BUILD_DIR)):/build \
 	  -v $(abspath $(TOOLS_DIR)):/tools:ro \
-	  debian:bookworm-slim \
-	  /tools/luac.cross.linux -o /build/$*.lc /src/$*.lua
+	  -v $(abspath $(RESOURCE_DIR)):/resources:ro \
+	  $(DOCKER_IMAGE_NAME) \
+	  make -C /build
 
 upload:
 	uvx nodemcu-uploader --port $(PORT) upload $(LC_FILES)
