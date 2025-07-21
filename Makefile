@@ -50,11 +50,9 @@ PORT?=COM3
 USER_CONFIG=$(CONFIG_DIR)/user_config.h
 USER_MODULES=$(CONFIG_DIR)/user_modules.h
 LUA_FILES=$(wildcard $(SRC_DIR)/*.lua)
-LC_FILES=$(patsubst $(SRC_DIR)/%.lua,$(BUILD_DIR)/%.lc,$(LUA_FILES))
 FIRMWARE_BUILD_MARKER_NAME=firmware-build-stamp
 FIRMWARE_BIN_MARKER=$(FIRMWARE_DIR)/bin/${FIRMWARE_BUILD_MARKER_NAME}
 ARCH := $(shell docker version --format '{{.Server.Arch}}')
-LUACROSS_BIN=$(TOOLS_DIR)/luac_cross_$(ARCH)
 DOCKER_IMAGE_NAME=dbwalker/lua-compiler-devtool:latest
 RESOURCE_DIR=resources
 
@@ -71,7 +69,13 @@ $(FIRMWARE_BIN_MARKER): $(FIRMWARE_DIR) $(USER_CONFIG) $(USER_MODULES)
 	  -v $(abspath $(FIRMWARE_DIR)):/opt/nodemcu-firmware \
 	  -v $(abspath $(USER_CONFIG)):/opt/nodemcu-firmware/app/include/user_config.h:ro \
 	  -v $(abspath $(USER_MODULES)):/opt/nodemcu-firmware/app/include/user_modules.h:ro \
-	  marcelstoer/nodemcu-build /bin/sh -c "build && touch /opt/nodemcu-firmware/bin/$(FIRMWARE_BIN_MARKER_NAME)"
+	  marcelstoer/nodemcu-build /bin/sh -c "\
+		echo Building...; \
+	    build; \
+	    rc=$$?; \
+	    echo Build return code: $$rc; \
+	    [ $$rc -eq 0 ] && touch /opt/nodemcu-firmware/bin/$(FIRMWARE_BUILD_MARKER_NAME); \
+	    exit $$rc"
 
 build-firmware: $(FIRMWARE_BIN_MARKER)
 
@@ -83,26 +87,26 @@ copy-artifacts:
 	  /bin/sh -c "\
 	    set -e; \
 	    fw_file=$$(ls -t /fw/bin/nodemcu_*.bin | head -n1); \
-	    cross_file=$$(ls -t /fw/luac.cross* | head -n1); \
 	    cp $$fw_file /tools/firmware-latest.bin; \
-	    cp $$cross_file /tools/luac.cross.linux.$(ARCH); \
 	    echo 'Copied:'; \
 	    echo '  Firmware ->' $$(basename $$fw_file); \
-	    echo '  Luacross ->' $$(basename $$cross_file); \
 	  "
  
 
 compile: $(FIRMWARE_BIN_MARKER) 
 	docker run --rm \
-	  -v $(abspath $(SRC_DIR)):/src:ro \
-	  -v $(abspath $(BUILD_DIR)):/build \
-	  -v $(abspath $(TOOLS_DIR)):/tools:ro \
+	  -v $(abspath $(SRC_DIR)):/src \
+	  -v $(abspath $(BUILD_DIR)):/build:ro \
 	  -v $(abspath $(RESOURCE_DIR)):/resources:ro \
+	  -v $(abspath $(FIRMWARE_DIR)):/fw:ro \
 	  $(DOCKER_IMAGE_NAME) \
 	  make -C /build
 
 upload:
-	uvx nodemcu-uploader --port $(PORT) upload $(LC_FILES)
+	uvx nodemcu-uploader --port $(PORT) upload $(LUA_FILES)
+
+flash:
+	uvx esptool --port $(PORT) write_flash -fm dio 0x00000 $(TOOLS_DIR)/firmware-latest.bin
 
 repl:
 	uvx nodemcu-uploader --port $(PORT) terminal

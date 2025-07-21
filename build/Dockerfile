@@ -8,10 +8,9 @@ RUN apt-get update && apt-get install -y \
     lua-sec \
     lua-socket \
     lua-filesystem \
+    bash \
     && rm -rf /var/lib/apt/lists/*
 
 # Set a working directory
 WORKDIR /workspace
 
-# Default entrypoint: run shell
-ENTRYPOINT ["/bin/sh"]
