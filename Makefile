@@ -51,7 +51,7 @@ USER_CONFIG=$(CONFIG_DIR)/user_config.h
 USER_MODULES=$(CONFIG_DIR)/user_modules.h
 LUA_FILES=$(wildcard $(SRC_DIR)/*.lua)
 FIRMWARE_BUILD_MARKER_NAME=firmware-build-stamp
-FIRMWARE_BIN_MARKER=$(FIRMWARE_DIR)/bin/${FIRMWARE_BUILD_MARKER_NAME}
+FIRMWARE_BIN_MARKER=$(BUILD_DIR)/${FIRMWARE_BUILD_MARKER_NAME}
 ARCH := $(shell docker version --format '{{.Server.Arch}}')
 DOCKER_IMAGE_NAME=dbwalker/lua-compiler-devtool:latest
 RESOURCE_DIR=resources
@@ -69,12 +69,13 @@ $(FIRMWARE_BIN_MARKER): $(FIRMWARE_DIR) $(USER_CONFIG) $(USER_MODULES)
 	  -v $(abspath $(FIRMWARE_DIR)):/opt/nodemcu-firmware \
 	  -v $(abspath $(USER_CONFIG)):/opt/nodemcu-firmware/app/include/user_config.h:ro \
 	  -v $(abspath $(USER_MODULES)):/opt/nodemcu-firmware/app/include/user_modules.h:ro \
+	  -v $(abspath $(BUILD_DIR)):/build \
 	  marcelstoer/nodemcu-build /bin/sh -c "\
 		echo Building...; \
 	    build; \
 	    rc=$$?; \
 	    echo Build return code: $$rc; \
-	    [ $$rc -eq 0 ] && touch /opt/nodemcu-firmware/bin/$(FIRMWARE_BUILD_MARKER_NAME); \
+	    [ $$rc -eq 0 ] && touch /build/$(FIRMWARE_BUILD_MARKER_NAME); \
 	    exit $$rc"
 
 build-firmware: $(FIRMWARE_BIN_MARKER)
@@ -103,7 +104,9 @@ compile: $(FIRMWARE_BIN_MARKER)
 	  make -C /build
 
 upload:
-	uvx nodemcu-uploader --port $(PORT) upload $(LUA_FILES)
+	uvx nodemcu-uploader --port $(PORT) file remove_all
+	cd $(SRC_DIR) && \
+	uvx nodemcu-uploader --port $(PORT) upload $(notdir $(LUA_FILES))
 
 flash:
 	uvx esptool --port $(PORT) write_flash -fm dio 0x00000 $(TOOLS_DIR)/firmware-latest.bin
